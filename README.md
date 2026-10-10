@@ -1,4 +1,4 @@
-# SyncUp 📅
+# SyncUp 
 
 
 **Do your friends have busy schedules? Does it seem impossible to plan a hangout? SyncUp is the solution for that!**
