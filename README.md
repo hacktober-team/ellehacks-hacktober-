@@ -1,7 +1,7 @@
 # SyncUp 📅
 
-**Find a time. Make a plan. Hang out together.**
-Do your friends have busy schedules? Does it seem impossible to plan a hangout? SyncUp is the solution for that! 
+
+**Do your friends have busy schedules? Does it seem impossible to plan a hangout? SyncUp is the solution for that!**
 SyncUp is a collaborative scheduling website designed to help students and friend groups find the perfect time to hang out. With busy class schedules, assignments, extracurriculars, and other commitments, coordinating plans with friends can be difficult. SyncUp brings everyone's schedules together in one place, making it easy to see who's available, identify overlapping free time, and plan meetups.
 
 ##  Features
