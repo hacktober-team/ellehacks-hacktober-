@@ -71,7 +71,7 @@ Coordinating schedules shouldn't be harder than making the plans themselves. Syn
 
 Contributions, suggestions, and feedback are welcome! Feel free to explore the repository, suggest improvements, or help make group scheduling even easier.
 
-## 📄 License
+##  License
 
 A license has not yet been specified for this project.
 
