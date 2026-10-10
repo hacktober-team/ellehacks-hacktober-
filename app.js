@@ -87,7 +87,7 @@ const pref={
 const S={
   groups:{},members:{},gid:pref.get('gid',null),view:'avail',edit:null,
   off:new Set(pref.get('off',[])),minDur:pref.get('minDur',60),w0:pref.get('w0',9*60),w1:pref.get('w1',22*60),
-  mode:'loading',ready:false,me:null,owner:false,joined:new Set(pref.get('joined',[])),canWrite:true,err:'',hl:null,
+  firebase:false,mode:'loading',ready:false,me:null,owner:false,joined:new Set(pref.get('joined',[])),canWrite:true,err:'',hl:null,
   sample:null,imgCaps:null,aiText:'',aiBusy:false,grid:null,act:[],db:null
 };
 const W=()=>S.canWrite!==false;
@@ -112,13 +112,32 @@ async function del(col,id){
 }
 async function safe(fn){
   try{await fn();return true;}
-  catch(e){toast(e&&e.code==='invalid_argument'?'You can view this calendar but not change it. Ask the owner for Contributor access.':'That change did not save. Check your connection and try again.');return false;}
+  catch(e){toast(e&&e.code==='invalid_argument'?'You can view this calendar but not change it. Ask the owner for Contributor access.':e&&e.code==='permission-denied'?'Firebase refused that change. Check that the Firestore rules allow writes (see README.md).':'That change did not save. Check your connection and try again.');return false;}
 }
+/* ---------- Firebase (used when the page runs on its own, outside Claude) ---------- */
+const FB_VERSION='10.14.1';
+async function firebaseDb(cfg){
+  const base='https://www.gstatic.com/firebasejs/'+FB_VERSION+'/';
+  const [app,fs]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-firestore.js')]);
+  const fdb=fs.getFirestore(app.initializeApp(cfg));
+  // Same small interface the Claude-hosted version uses: collection(name).onSnapshot, doc('name/id').set/delete
+  return{
+    collection:c=>({onSnapshot:(next,err)=>fs.onSnapshot(fs.collection(fdb,c),
+      snap=>next({docs:snap.docs.map(d=>({id:d.id,exists:true,data:()=>d.data()}))}),
+      e=>{if(err)err(e);})}),
+    doc:path=>{const [c,id]=path.split('/');const ref=fs.doc(fdb,c,id);return{set:d=>fs.setDoc(ref,d),delete:()=>fs.deleteDoc(ref)};}
+  };
+}
+// No sign-in on this version, so each device gets a random id. It marks which person is "you" on this device.
+function deviceId(){let id=pref.get('deviceId',null);if(!id){id=uid('d');pref.set('deviceId',id);}return id;}
+const connErr=()=>S.firebase
+  ?'Could not reach the Firebase database. Check that Firestore is created and its rules allow reads and writes (see README.md).'
+  :'The connection to the shared calendar dropped. Reload the page to reconnect.';
 function startDb(db){
   S.db=db;let g=false,m=false;
   const done=()=>{const was=S.ready;if(g&&m)S.ready=true;render();if(!was&&S.ready)handleHash();};
-  db.collection('groups').onSnapshot(snap=>{const o={};snap.docs.forEach(d=>{const v=d.data();if(v)o[d.id]=v;});S.groups=o;g=true;done();},()=>{S.err='The connection to the shared calendar dropped. Reload the page to reconnect.';render();});
-  db.collection('members').onSnapshot(snap=>{const o={};snap.docs.forEach(d=>{const v=d.data();if(v)o[d.id]=v;});S.members=o;m=true;done();},()=>{S.err='The connection to the shared calendar dropped. Reload the page to reconnect.';render();});
+  db.collection('groups').onSnapshot(snap=>{const o={};snap.docs.forEach(d=>{const v=d.data();if(v)o[d.id]=v;});S.groups=o;g=true;done();},()=>{S.err=connErr();render();});
+  db.collection('members').onSnapshot(snap=>{const o={};snap.docs.forEach(d=>{const v=d.data();if(v)o[d.id]=v;});S.members=o;m=true;done();},()=>{S.err=connErr();render();});
 }
 function startLocal(){
   const d=pref.get('data',null)||{groups:{},members:{}};
@@ -128,6 +147,10 @@ async function init(){
   render();
   const c=window.claude;let db=null,user=null;
   if(c&&c.use){[db,user]=await Promise.all([c.use('db').catch(()=>null),c.use('user').catch(()=>null)]);}
+  if(!db&&!(c&&c.use)&&window.FIREBASE_CONFIG){
+    try{db=await firebaseDb(window.FIREBASE_CONFIG);S.firebase=true;S.me=deviceId();}
+    catch(e){db=null;S.err='Could not load Firebase, so schedules are saved on this device only. Check your connection and the settings in firebase-config.js.';}
+  }
   if(user){
     try{S.me=await user.id();}catch(e){}
     try{S.owner=await user.isOwner();}catch(e){}
@@ -189,7 +212,7 @@ function renderTabs(gl){
 function renderBanner(){
   let h='';
   if(S.err)h='<div class="banner err" role="alert">'+esc(S.err)+'</div>';
-  else if(S.mode==='local')h='<div class="banner">Sync is off in this view, so schedules stay on this device only.</div>';
+  else if(S.mode==='local')h='<div class="banner">'+(window.claude?'Sync is off in this view, so schedules stay on this device only.':'Saving on this device only. Add your Firebase settings in firebase-config.js to share calendars with friends.')+'</div>';
   else if(!W())h='<div class="banner">You can look around, but only people with Contributor access can add or change schedules.</div>';
   $('#banner').innerHTML=h;
 }
@@ -474,7 +497,7 @@ async function inviteDlg(gid){
   openDlg('<h2>Invite friends to '+esc(g.name)+'</h2><p class="muted">Friends open the page, choose Join with code and type this code, or scan the QR code with their phone camera.</p>'
     +'<div class="invite"><div class="codebox"><span class="code" id="cd">'+esc(showCode(code))+'</span><button type="button" class="btn sm" id="cpc">Copy code</button></div><div class="qrbox" id="qr"></div></div>'
     +'<div class="form"><label>Invite link<span class="row-in"><input type="text" id="lnk" value="'+esc(pageUrl()+'#join-'+normCode(code))+'"><button type="button" class="btn sm" id="cpl">Copy link</button></span></label></div>'
-    +'<p class="muted small">Friends need access to this page first, so invite them from the page\'s Share menu with Contributor access. The code takes them to the right group. It does not hide groups from each other.</p>'
+    +'<p class="muted small">'+(S.firebase?'Friends open the same website address, then enter this code or scan the QR code. The code takes them to the right group. It does not hide groups from each other.':'Friends need access to this page first, so invite them from the page\'s Share menu with Contributor access. The code takes them to the right group. It does not hide groups from each other.')+'</p>'
     +'<div class="actions"><span class="sp"></span><button type="button" class="btn primary" data-close>Done</button></div>',dlg=>{
     const qrEl=$('#qr',dlg),lnk=$('#lnk',dlg);let qr=null;
     const draw=()=>{
