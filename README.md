@@ -31,5 +31,6 @@ Open the group, choose **Invite friends with a code or QR**, and send the code, 
 
 ### Notes
 
+- Invite links and QR codes use `SITE_URL` in `firebase-config.js` when you create them from a local preview. A link that starts with `localhost` or `127.0.0.1` only works on your own computer.
 - The photo import and "Ask Claude" buttons only appear in the version published inside Claude.
 - Firebase web settings are public by design. If GitHub or Google warns about the API key, restrict the key to your site's address in the Google Cloud console.

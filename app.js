@@ -69,7 +69,14 @@ const uid=p=>p+Math.random().toString(36).slice(2,9)+Date.now().toString(36).sli
 const COLOR_NAMES=['Vermilion','Blue','Green','Amber','Violet','Pink','Teal','Olive'];
 // Page link used in invite links and QR codes. Change it if you host the page somewhere else.
 const SHARE_URL='https://claude.ai/artifact/6DX4NX5w7A71RKAxBSJrnU';
-const pageUrl=()=>window.claude&&window.claude.use?SHARE_URL:location.href.split('#')[0];
+// A page opened from your own computer (VS Code preview, Live Server, a file) has an address friends cannot reach.
+const isLocalAddress=()=>location.protocol==='file:'||/^(localhost|127\.|0\.0\.0\.0|\[::1\]|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+// Invite links use SITE_URL (set in firebase-config.js) whenever the page is opened from a local address.
+const pageUrl=()=>{
+  if(window.claude&&window.claude.use)return SHARE_URL;
+  if(window.SITE_URL&&isLocalAddress())return window.SITE_URL;
+  return location.href.split('#')[0].split('?')[0];
+};
 const CODE_CHARS='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function newCode(){
   const a=new Uint32Array(6);
@@ -494,7 +501,9 @@ async function inviteDlg(gid){
   const g=S.groups[gid];if(!g)return;
   let code=g.code;
   if(!code){code=newCode();if(!(await safe(()=>put('groups',gid,Object.assign(clone(g),{code})))))return;}
+  const localOnly=!(window.claude&&window.claude.use)&&isLocalAddress()&&!window.SITE_URL;
   openDlg('<h2>Invite friends to '+esc(g.name)+'</h2><p class="muted">Friends open the page, choose Join with code and type this code, or scan the QR code with their phone camera.</p>'
+    +(localOnly?'<p class="err" role="alert">This link only works on this computer, so friends will see "site can\'t be reached". Open your published website and create the invite there, or replace the link below with the website address.</p>':'')
     +'<div class="invite"><div class="codebox"><span class="code" id="cd">'+esc(showCode(code))+'</span><button type="button" class="btn sm" id="cpc">Copy code</button></div><div class="qrbox" id="qr"></div></div>'
     +'<div class="form"><label>Invite link<span class="row-in"><input type="text" id="lnk" value="'+esc(pageUrl()+'#join-'+normCode(code))+'"><button type="button" class="btn sm" id="cpl">Copy link</button></span></label></div>'
     +'<p class="muted small">'+(S.firebase?'Friends open the same website address, then enter this code or scan the QR code. The code takes them to the right group. It does not hide groups from each other.':'Friends need access to this page first, so invite them from the page\'s Share menu with Contributor access. The code takes them to the right group. It does not hide groups from each other.')+'</p>'

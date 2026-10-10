@@ -9,3 +9,7 @@ window.FIREBASE_CONFIG = {
   appId: "1:23743303970:web:5f840f9987779c8fbc557b",
   measurementId: "G-84KRSZWK7G"
 };
+
+// The public address friends open (your GitHub Pages address). Invite links and QR codes use it,
+// even when you create them from a local preview. Change it if your site lives somewhere else.
+window.SITE_URL = "https://hacktober-team.github.io/ellehacks-hacktober-/";
