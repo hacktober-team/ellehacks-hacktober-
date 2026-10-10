@@ -248,7 +248,7 @@ function renderMain(g,members){
   const el=$('#main');
   if(!S.ready){el.innerHTML='<div class="empty"><p>Loading calendars…</p></div>';return;}
   if(!g){
-    el.innerHTML='<div class="empty"><h2>Find a time everyone is free</h2><p>Make a calendar for each friend group. Everyone adds their class schedule in their own colour, and Free Together shows the hours nobody is busy.</p>'
+    el.innerHTML='<div class="empty"><h2>Find a time everyone is free</h2><p>Make a calendar for each friend group. Everyone adds their class schedule in their own colour, and SyncUp shows the hours nobody is busy.</p>'
       +(S.mode==='db'&&!S.owner?'<p>Did a friend send you a join code or QR code? Choose Join with a code to open their calendar.</p>':'')+'<div class="row">'
       +(S.mode==='db'?'<button class="btn'+(S.owner?'':' primary')+'" data-act="joincode">Join with a code</button>':'')
       +(W()?'<button class="btn'+(S.mode==='db'&&!S.owner?'':' primary')+'" data-act="newgroup">Create a friend group</button>':'')
