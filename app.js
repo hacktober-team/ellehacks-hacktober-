@@ -67,6 +67,17 @@ const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=p=>p+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 const COLOR_NAMES=['Vermilion','Blue','Green','Amber','Violet','Pink','Teal','Olive'];
+// Page link used in invite links and QR codes. Change it if you host the page somewhere else.
+const SHARE_URL='https://claude.ai/artifact/6DX4NX5w7A71RKAxBSJrnU';
+const pageUrl=()=>window.claude&&window.claude.use?SHARE_URL:location.href.split('#')[0];
+const CODE_CHARS='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+function newCode(){
+  const a=new Uint32Array(6);
+  if(window.crypto&&crypto.getRandomValues)crypto.getRandomValues(a);else for(let i=0;i<6;i++)a[i]=Math.floor(Math.random()*4294967295);
+  return [...a].map(v=>CODE_CHARS[v%CODE_CHARS.length]).join('');
+}
+const normCode=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+const showCode=c=>{const n=normCode(c);return n.slice(0,3)+' '+n.slice(3);};
 const cx=m=>((Number(m&&m.color)||0)%8+8)%8;
 const pref={
   get(k,d){try{const v=localStorage.getItem('ft:'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},
@@ -76,7 +87,7 @@ const pref={
 const S={
   groups:{},members:{},gid:pref.get('gid',null),view:'avail',edit:null,
   off:new Set(pref.get('off',[])),minDur:pref.get('minDur',60),w0:pref.get('w0',9*60),w1:pref.get('w1',22*60),
-  mode:'loading',ready:false,me:null,canWrite:true,err:'',hl:null,
+  mode:'loading',ready:false,me:null,owner:false,joined:new Set(pref.get('joined',[])),canWrite:true,err:'',hl:null,
   sample:null,imgCaps:null,aiText:'',aiBusy:false,grid:null,act:[],db:null
 };
 const W=()=>S.canWrite!==false;
@@ -105,7 +116,7 @@ async function safe(fn){
 }
 function startDb(db){
   S.db=db;let g=false,m=false;
-  const done=()=>{if(g&&m)S.ready=true;render();};
+  const done=()=>{const was=S.ready;if(g&&m)S.ready=true;render();if(!was&&S.ready)handleHash();};
   db.collection('groups').onSnapshot(snap=>{const o={};snap.docs.forEach(d=>{const v=d.data();if(v)o[d.id]=v;});S.groups=o;g=true;done();},()=>{S.err='The connection to the shared calendar dropped. Reload the page to reconnect.';render();});
   db.collection('members').onSnapshot(snap=>{const o={};snap.docs.forEach(d=>{const v=d.data();if(v)o[d.id]=v;});S.members=o;m=true;done();},()=>{S.err='The connection to the shared calendar dropped. Reload the page to reconnect.';render();});
 }
@@ -119,6 +130,7 @@ async function init(){
   if(c&&c.use){[db,user]=await Promise.all([c.use('db').catch(()=>null),c.use('user').catch(()=>null)]);}
   if(user){
     try{S.me=await user.id();}catch(e){}
+    try{S.owner=await user.isOwner();}catch(e){}
     try{if((await user.can('data.write'))===false)S.canWrite=false;}catch(e){}
   }
   if(db){S.mode='db';startDb(db);}else{S.mode='local';startLocal();}
@@ -132,7 +144,8 @@ async function init(){
 }
 
 /* ---------- derived ---------- */
-const groupList=()=>Object.entries(S.groups).map(([id,g])=>Object.assign({id},g)).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
+const visible=id=>S.mode!=='db'||S.owner||S.joined.has(id);
+const groupList=()=>Object.entries(S.groups).filter(([id])=>visible(id)).map(([id,g])=>Object.assign({id},g)).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
 const membersOf=gid=>Object.entries(S.members).filter(([,m])=>m&&m.gid===gid).map(([id,m])=>Object.assign({id},m,{blocks:Array.isArray(m.blocks)?m.blocks:[]})).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
 function nextDate(d,endMin){
   const now=new Date();const t=(now.getDay()+6)%7;let delta=(d-t+7)%7;
@@ -170,6 +183,7 @@ function render(){
 }
 function renderTabs(gl){
   $('#tabs').innerHTML=gl.map(g=>'<button class="tab" data-act="tab" data-id="'+esc(g.id)+'" aria-current="'+(g.id===S.gid)+'">'+esc(g.name)+'</button>').join('')
+    +(S.mode==='db'&&S.ready?'<button class="tab new" data-act="joincode">Join with code</button>':'')
     +(W()&&S.ready?'<button class="tab new" data-act="newgroup">+ New group</button>':'');
 }
 function renderBanner(){
@@ -192,6 +206,7 @@ function renderRail(g,members){
       +(W()?'<button class="btn sm" data-act="edit" data-id="'+esc(m.id)+'">Schedule</button>':'')+'</div>';
   });
   h+='</section>';
+  if(S.mode==='db'&&W())h+='<button class="btn" data-act="invite">Invite friends with a code or QR</button>';
   h+='<section class="panel set"><h2>Hangout settings</h2>'
     +'<label>At least<select data-act="minDur" id="minDur">'+[30,60,90,120,180,240].map(v=>'<option value="'+v+'"'+(v===S.minDur?' selected':'')+'>'+durText(v)+'</option>').join('')+'</select></label>'
     +'<div class="two"><label>Earliest<select data-act="w0" id="w0">'+Array.from({length:14},(_,i)=>7+i).map(h2=>'<option value="'+h2*60+'"'+(h2*60===S.w0?' selected':'')+'>'+hourLabel(h2)+'</option>').join('')+'</select></label>'
@@ -203,8 +218,10 @@ function renderMain(g,members){
   const el=$('#main');
   if(!S.ready){el.innerHTML='<div class="empty"><p>Loading calendars…</p></div>';return;}
   if(!g){
-    el.innerHTML='<div class="empty"><h2>Find a time everyone is free</h2><p>Make a calendar for each friend group. Everyone adds their class schedule in their own colour, and Free Together shows the hours nobody is busy.</p><div class="row">'
-      +(W()?'<button class="btn primary" data-act="newgroup">Create a friend group</button>':'')
+    el.innerHTML='<div class="empty"><h2>Find a time everyone is free</h2><p>Make a calendar for each friend group. Everyone adds their class schedule in their own colour, and Free Together shows the hours nobody is busy.</p>'
+      +(S.mode==='db'&&!S.owner?'<p>Did a friend send you a join code or QR code? Choose Join with a code to open their calendar.</p>':'')+'<div class="row">'
+      +(S.mode==='db'?'<button class="btn'+(S.owner?'':' primary')+'" data-act="joincode">Join with a code</button>':'')
+      +(W()?'<button class="btn'+(S.mode==='db'&&!S.owner?'':' primary')+'" data-act="newgroup">Create a friend group</button>':'')
       +(S.mode==='local'?'<button class="btn" data-act="example">Try an example</button>':'')+'</div></div>';
     return;
   }
@@ -217,7 +234,7 @@ function renderMain(g,members){
   const grid=compute(act);S.grid=grid;S.act=act;
   const n=act.length;
   const full=n>=2?rank(findWindows(grid,0,S.w0,S.w1),S.minDur):[];
-  const recs=full.slice(0,5);S.recs=recs;
+  const recs=full.slice(0,4);S.recs=recs;
   const almost=n>=3?rank(findWindows(grid,1,S.w0,S.w1).filter(w=>w.missing.length===1),S.minDur).slice(0,4):[];
   S.almost=almost;
   const editing=S.edit?members.find(m=>m.id===S.edit):null;
@@ -298,6 +315,8 @@ document.addEventListener('click',e=>{
   if(a==='tab'){S.gid=el.dataset.id;S.edit=null;S.hl=null;S.aiText='';pref.set('gid',S.gid);render();}
   else if(a==='newgroup')groupDlg(null);
   else if(a==='groupset')groupDlg(S.gid);
+  else if(a==='joincode')joinDlg('');
+  else if(a==='invite')inviteDlg(S.gid);
   else if(a==='addperson')personDlg(null);
   else if(a==='edit'){S.edit=el.dataset.id;S.view='sched';render();}
   else if(a==='done'){S.edit=null;render();}
@@ -338,7 +357,8 @@ function groupDlg(id){
       if(g){closeDlg();await safe(()=>put('groups',id,Object.assign({},g,{name})));}
       else{
         const nid=uid('g');S.gid=nid;S.edit=null;S.hl=null;S.aiText='';pref.set('gid',nid);closeDlg();
-        if(await safe(()=>put('groups',nid,{name,createdAt:Date.now()})))personDlg(null);
+        joinLocal(nid);
+        if(await safe(()=>put('groups',nid,{name,createdAt:Date.now(),code:newCode()})))personDlg(null);
       }
     });
     const del_=$('#del',dlg);
@@ -404,6 +424,72 @@ function blockDlg(o){
     });
     const del_=$('#del',dlg);
     if(del_)del_.addEventListener('click',async()=>{const next=clone(m);next.blocks=next.blocks.filter(x=>x.id!==b.id);closeDlg();if(await safe(()=>put('members',o.mid,next)))toast('Removed '+(b.label||'block')+'.');});
+  });
+}
+
+/* ---------- joining from other devices ---------- */
+function joinLocal(gid){S.joined.add(gid);pref.set('joined',[...S.joined]);}
+function findByCode(raw){
+  const n=normCode(raw);if(n.length<4)return null;
+  const hit=Object.entries(S.groups).find(([,g])=>g&&g.code&&normCode(g.code)===n);
+  return hit?hit[0]:null;
+}
+function joinGroup(gid){
+  joinLocal(gid);S.gid=gid;S.edit=null;S.hl=null;S.aiText='';pref.set('gid',gid);render();
+  const g=S.groups[gid];toast('Joined '+(g?g.name:'the group')+'.');
+  const mine=membersOf(gid).some(m=>S.me&&m.ownerId===S.me);
+  if(W()&&!mine)personDlg(null);
+}
+function handleHash(){
+  const m=/^#join-([A-Za-z0-9]{4,12})$/.exec(location.hash||'');
+  if(!m||!S.ready||S.mode!=='db')return;
+  try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}
+  const gid=findByCode(m[1]);
+  if(gid)joinGroup(gid);
+  else joinDlg(m[1],'That join code did not match a group. Check it with whoever invited you.');
+}
+window.addEventListener('hashchange',handleHash);
+function joinDlg(prefill,err){
+  openDlg('<h2>Join a friend group</h2><p class="muted">Type the code your friend shared, or open the invite link or scan the QR code they sent.</p>'
+    +'<form class="form" id="f"><label>Join code<input type="text" class="mono" id="jc" required maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="K7M 2QX" value="'+esc(prefill?showCode(prefill):'')+'"></label>'
+    +'<p class="err" id="er" role="alert"'+(err?'':' hidden')+'>'+esc(err||'')+'</p>'
+    +'<div class="actions"><span class="sp"></span><button type="button" class="btn ghost" data-close>Cancel</button><button class="btn primary">Join group</button></div></form>',dlg=>{
+    $('#f',dlg).addEventListener('submit',ev=>{
+      ev.preventDefault();const gid=findByCode($('#jc',dlg).value);
+      if(!gid){const er=$('#er',dlg);er.textContent='No group has that code. Check it and try again.';er.hidden=false;return;}
+      closeDlg();joinGroup(gid);
+    });
+    setTimeout(()=>{const i=$('#jc',dlg);if(i)i.focus();},0);
+  });
+}
+function copyText(text,input,btn){
+  const ok=()=>{if(btn){const t=btn.textContent;btn.textContent='Copied';setTimeout(()=>{btn.textContent=t;},1500);}};
+  const fallback=()=>{if(input){input.focus();input.select();}toast('Press Ctrl+C (or Cmd+C) to copy.');};
+  try{navigator.clipboard.writeText(text).then(ok,fallback);}catch(e){fallback();}
+}
+async function inviteDlg(gid){
+  const g=S.groups[gid];if(!g)return;
+  let code=g.code;
+  if(!code){code=newCode();if(!(await safe(()=>put('groups',gid,Object.assign(clone(g),{code})))))return;}
+  openDlg('<h2>Invite friends to '+esc(g.name)+'</h2><p class="muted">Friends open the page, choose Join with code and type this code, or scan the QR code with their phone camera.</p>'
+    +'<div class="invite"><div class="codebox"><span class="code" id="cd">'+esc(showCode(code))+'</span><button type="button" class="btn sm" id="cpc">Copy code</button></div><div class="qrbox" id="qr"></div></div>'
+    +'<div class="form"><label>Invite link<span class="row-in"><input type="text" id="lnk" value="'+esc(pageUrl()+'#join-'+normCode(code))+'"><button type="button" class="btn sm" id="cpl">Copy link</button></span></label></div>'
+    +'<p class="muted small">Friends need access to this page first, so invite them from the page\'s Share menu with Contributor access. The code takes them to the right group. It does not hide groups from each other.</p>'
+    +'<div class="actions"><span class="sp"></span><button type="button" class="btn primary" data-close>Done</button></div>',dlg=>{
+    const qrEl=$('#qr',dlg),lnk=$('#lnk',dlg);let qr=null;
+    const draw=()=>{
+      if(!window.QRCode){qrEl.hidden=true;return;}
+      try{
+        if(!qr)qr=new QRCode(qrEl,{text:lnk.value,width:168,height:168,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+        else{qr.clear();qr.makeCode(lnk.value);}
+        qrEl.hidden=false;
+      }catch(e){qrEl.hidden=true;}
+    };
+    draw();
+    lnk.addEventListener('input',draw);
+    lnk.addEventListener('focus',()=>lnk.select());
+    $('#cpc',dlg).addEventListener('click',ev=>copyText(showCode(code),null,ev.currentTarget));
+    $('#cpl',dlg).addEventListener('click',ev=>copyText(lnk.value,lnk,ev.currentTarget));
   });
 }
 
